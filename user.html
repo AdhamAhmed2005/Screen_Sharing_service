@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>User - Share Screen</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      background-color: #f0f2f5;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    h1 {
+      text-align: center;
+      color: #333;
+      font-size: 2.5em;
+      margin-bottom: 20px;
+      text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.1);
+    }
+
+    #roomInfo {
+      text-align: center;
+      font-weight: bold;
+      font-size: 1.2em;
+      color: #1a73e8;
+      margin-bottom: 20px;
+      background-color: #e8f0fe;
+      padding: 10px 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    #localVideo {
+      width: 640px;
+      max-width: 100%;
+      height: auto;
+      border: 2px solid #333;
+      border-radius: 10px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+      background-color: #000;
+      display: block;
+      margin: 0 auto 20px;
+    }
+
+    #shareButton {
+      margin: 20px auto;
+      display: block;
+      padding: 12px 30px;
+      font-size: 1.1em;
+      font-weight: bold;
+      color: white;
+      background-color: #1a73e8;
+      border: none;
+      border-radius: 25px;
+      cursor: pointer;
+      transition: background-color 0.3s, transform 0.2s;
+    }
+
+    #shareButton:hover:not(:disabled) {
+      background-color: #1557b0;
+      transform: scale(1.05);
+    }
+
+    #shareButton:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+
+    @media (max-width: 768px) {
+      h1 {
+        font-size: 2em;
+      }
+
+      #localVideo {
+        width: 100%;
+      }
+
+      #roomInfo {
+        font-size: 1em;
+        padding: 8px 15px;
+      }
+
+      #shareButton {
+        padding: 10px 20px;
+        font-size: 1em;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>User Screen Share</h1>
+  <div id="roomInfo">Generating room ID...</div>
+  <video id="localVideo" autoplay playsinline muted></video>
+  <button id="shareButton" disabled>Share Screen</button>
+
+  <script>
+    function generateUUID() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    }
+
+    const socket = io();
+    const room = generateUUID(); 
+    const peerConnection = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
+      ]
+    });
+
+    document.getElementById('roomInfo').textContent = `Your Room ID: ${room}. Share this with the support team.`;
+
+    socket.emit('join-room', room);
+
+    const shareButton = document.getElementById('shareButton');
+    const localVideo = document.getElementById('localVideo');
+
+    socket.on('room-joined', (data) => {
+      console.log(`Joined room: ${data.room}, Clients: ${data.clientCount}`);
+      if (data.clientCount >= 2) {
+        shareButton.disabled = false;
+        document.getElementById('roomInfo').textContent += ' Support has joined!';
+      }
+    });
+
+    shareButton.onclick = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: false
+        });
+
+        localVideo.srcObject = stream;
+
+        stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        socket.emit('offer', { room, offer });
+
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate) {
+            console.log('Sending ICE candidate');
+            socket.emit('ice-candidate', { room, candidate: event.candidate });
+          }
+        };
+
+        peerConnection.onconnectionstatechange = () => {
+          console.log('User connection state:', peerConnection.connectionState);
+        };
+      } catch (error) {
+        console.error('Error sharing screen:', error);
+        alert('Failed to share screen. Ensure you allow screen sharing in the browser prompt.');
+      }
+    };
+
+    socket.on('answer', async (data) => {
+      console.log('Received answer from:', data.from);
+      try {
+        await peerConnection.setRemoteDescription(data.answer);
+      } catch (error) {
+        console.error('Error setting remote description:', error);
+      }
+    });
+
+    socket.on('ice-candidate', async (data) => {
+      try {
+        console.log('Received ICE candidate');
+        await peerConnection.addIceCandidate(data.candidate);
+      } catch (error) {
+        console.error('Error adding ICE candidate:', error);
+      }
+    });
+  </script>
+</body>
+</html>

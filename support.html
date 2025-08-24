@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Support - View Screen</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      background-color: #f0f2f5;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    h1 {
+      text-align: center;
+      color: #333;
+      font-size: 2.5em;
+      margin-bottom: 20px;
+      text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.1);
+    }
+
+    #roomForm {
+      margin: 20px 0;
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #roomInput {
+      padding: 10px;
+      font-size: 1.1em;
+      border: 2px solid #ccc;
+      border-radius: 8px;
+      width: 250px;
+      transition: border-color 0.3s;
+    }
+
+    #roomInput:focus {
+      border-color: #1a73e8;
+      outline: none;
+    }
+
+    #roomInput:disabled {
+      background-color: #e0e0e0;
+      cursor: not-allowed;
+    }
+
+    #joinButton {
+      padding: 10px 20px;
+      font-size: 1.1em;
+      font-weight: bold;
+      color: white;
+      background-color: #1a73e8;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background-color 0.3s, transform 0.2s;
+    }
+
+    #joinButton:hover:not(:disabled) {
+      background-color: #1557b0;
+      transform: scale(1.05);
+    }
+
+    #joinButton:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+
+    #roomStatus {
+      text-align: center;
+      font-weight: bold;
+      font-size: 1.2em;
+      color: #1a73e8;
+      margin: 20px 0;
+      background-color: #e8f0fe;
+      padding: 10px 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    #remoteVideo {
+      width: 640px;
+      max-width: 100%;
+      height: auto;
+      border: 2px solid #333;
+      border-radius: 10px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+      background-color: #000;
+      display: block;
+      margin: 0 auto;
+    }
+
+    @media (max-width: 768px) {
+      h1 {
+        font-size: 2em;
+      }
+
+      #roomInput {
+        width: 200px;
+        font-size: 1em;
+      }
+
+      #joinButton {
+        padding: 8px 16px;
+        font-size: 1em;
+      }
+
+      #roomStatus {
+        font-size: 1em;
+        padding: 8px 15px;
+      }
+
+      #remoteVideo {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>Support View</h1>
+  <div id="roomForm">
+    <input type="text" id="roomInput" placeholder="Enter Room ID">
+    <button id="joinButton">Join Room</button>
+  </div>
+  <div id="roomStatus">Enter the Room ID provided by the user.</div>
+  <video id="remoteVideo" autoplay playsinline></video>
+
+  <script>
+    const socket = io();
+    let room = '';
+    const peerConnection = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
+      ]
+    });
+
+    const joinButton = document.getElementById('joinButton');
+    const roomInput = document.getElementById('roomInput');
+    const roomStatus = document.getElementById('roomStatus');
+    const remoteVideo = document.getElementById('remoteVideo');
+
+    joinButton.onclick = () => {
+      room = roomInput.value.trim();
+      if (!room) {
+        alert('Please enter a valid Room ID.');
+        return;
+      }
+      socket.emit('join-room', room);
+      roomStatus.textContent = `Joined Room: ${room}. Waiting for user stream...`;
+      roomInput.disabled = true;
+      joinButton.disabled = true;
+    };
+
+    socket.on('room-joined', (data) => {
+      console.log(`Joined room: ${data.room}, Clients: ${data.clientCount}`);
+      if (data.clientCount >= 2) {
+        roomStatus.textContent = `Connected to Room: ${room}. Ready for screen sharing.`;
+      }
+    });
+
+    peerConnection.ontrack = (event) => {
+      console.log('Received remote stream:', event.streams[0]);
+      remoteVideo.srcObject = event.streams[0];
+    };
+
+    socket.on('offer', async (data) => {
+      console.log('Received offer from:', data.from);
+      try {
+        await peerConnection.setRemoteDescription(data.offer);
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        socket.emit('answer', { room, answer });
+      } catch (error) {
+        console.error('Error handling offer:', error);
+      }
+    });
+
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        console.log('Sending ICE candidate');
+        socket.emit('ice-candidate', { room, candidate: event.candidate });
+      }
+    };
+
+    socket.on('ice-candidate', async (data) => {
+      try {
+        console.log('Received ICE candidate');
+        await peerConnection.addIceCandidate(data.candidate);
+      } catch (error) {
+        console.error('Error adding ICE candidate:', error);
+      }
+    });
+
+    peerConnection.onconnectionstatechange = () => {
+      console.log('Support connection state:', peerConnection.connectionState);
+    };
+  </script>
+</body>
+</html>
